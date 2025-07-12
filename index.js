@@ -6,7 +6,7 @@ const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Define model once
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" }); // Define model once
 
 const HISTORY_WINDOW_SIZE = 10; // Keep the last 10 user-bot message pairs (20 messages total)
 
