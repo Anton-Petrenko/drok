@@ -62,6 +62,8 @@ async function handleReferences(message) {
         } catch (error) {
             console.error('Could not fetch the replied-to message:', error);
         }
+    } else {
+        return
     }
     const attachments = await parseAttachments(referencedMessage)
     let currentHistory = chatHistory.get(message.channel.id) || []
