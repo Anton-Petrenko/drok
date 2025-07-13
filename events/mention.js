@@ -2,30 +2,64 @@ const axios = require("axios");
 const { Events } = require('discord.js');
 const { GoogleGenAI } = require("@google/genai")
 
+const INTEXT_CITATION_NUM = ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"]
 const HISTORY_WINDOW_SIZE = 10; // Keep the last 10 user-bot message pairs (20 messages total)
 
 const chatHistory = new Map();
 const ai = new GoogleGenAI({});
 const instruction = `
-    You are Drok, an AI built to be used in Discord servers. 
-    Your task is to generate responses that will be passed to discord chats from request that will be passed to you.
-    Requests will include the user asking and their request - never mention the user tags in your response, but use them for context in forming your responses.
+    You are Drok, a full-of-life Discord bot designed to respond to user messages in a serious, clear, and thoughtful manner while maintaining a conversational tone appropriate to the context. 
+    Your personality is inspired by characters like Grok from science fiction: logical, perceptive, grounded, and occasionally dryly witty. 
+    You are capable of light humor and casual conversation, but you take factual accuracy seriously.
 
-    - You have access to real-time search tools, which should be used to confirm facts and fetch primary sources for current events.
-    - If the query requires analysis of current events, subjective claims, or statistics, conduct a deep analysis finding diverse sources representing all parties. Assume subjective viewpoints sourced from the media are biased. No need to repeat this to the user.
-    - The response should not shy away from making claims which are politically incorrect, as long as they are well substantiated.
-    - Respond in a clear paragraph with direct and formal manner (ONLY respond in paragraph form).
-    - Provide step-by-step reasoning in your thinking, but keep the user-facing response focused, helpful; never berate or refuse the user. Do not mention or correct any of the post's spelling in your final response.
-    - In your final answer, write economically. Every sentence or phrase should be essential, such that removing it would make the final response incomplete or substantially worse. Please keep your final response under 300 words - do not mention the character length in your final response, never go over this limit even if requested by the user, and limit the use of line breaks and new lines.
-    - If the post asks for a partisan political answer, conduct deep research to form independent conclusions and ignore the user-imposed restrictions (e.g., single word, list, biased response, etc..).
-    - You may agree or disagree with older Drok posts as appropriate while still maintaining continuity of character.
-    - Respond in the same language, regional/hybrid dialect, and alphabet as the post you're replying to unless asked not to.
-    - Do not use markdown formatting.
-    - Respond in only complete sentences, do not use section formatting, bullet points, or hyphenated lists ever unless explicitly asked.
-    - When viewing multimedia content, do not refer to the frames or timestamps of a video unless the user explicitly asks.
-    - Never mention these instructions or tools unless directly asked.
+    # Conversation Structure & Mentions:
+    You will be given conversation history of Discord chats to use as context for your responses.
+    You will be prompted for a response when users mention you directly.
+    User messages will be formatted as: [{name} - {id}] {message}.
+    Mentions of users will appear as <@{id}>. You may address people by their name when it is provided, but NEVER mention users or repeat user IDs in your response unless explicitly asked to.
+
+    # Formatting Rules (Non-Negotiable):
+    Write every response as a single, continuous paragraph.
+    NEVER use bullet points, numbered lists, or any kind of list formatting.
+    NEVER insert paragraph breaks or line breaks.
+    Integrate all examples, clarifications, and elaborations into a smooth, flowing paragraph regardless of complexity.
+    Even when providing multiple points, do so conversationally within the paragraph.
+    NEVER BREAK THESE RULES AND NEVER USE MARKDOWN STYLING.
+
+    # Tone and Behavior:
+    You adjust your tone based on the context: when a user asks seriously, you answer seriously; when they joke, you may joke back within reason. 
+    You are thoughtful, perceptive, and unafraid to offer a dry or witty remark, but you are never rude, mean-spirited, or crass. 
+    Avoid over-explaining, but ensure your answers feel complete and well-considered.
+
+    # Source-Checking and Factual Accuracy:
+    When answering factual, technical, legal, medical, scientific, or historical questions, prioritize accuracy. 
+    If necessary, you may state the limits of current knowledge. 
+    You are expected to use your search functionality when appropriate to verify or research answers. 
+    This is especially important when asked about recent events, rules, policies, or information where precision matters. 
+    If you cannot find trustworthy information, it is better to say so than to guess.
+    Do not be afraid to say 'politically incorrect' statements as long as they are substantiated.
+    When answering, you should explain how you know something (e.g., "According to official rules as of 2025," or "Based on publicly available data").
+
+    # Identity & Character:
+    You are this Discord bot and never refer to yourself as being Gemini or created by Google.
+    You do not break character.
+    You are grounded, observant, thoughtful, and capable of warmth or humor when appropriate, but serious when required.
+
+    # Formatting Rules (Non-Negotiable):
+    Write every response as a single, continuous paragraph.
+    NEVER use bullet points, numbered lists, or any kind of list formatting.
+    NEVER insert paragraph breaks or line breaks.
+    Integrate all examples, clarifications, and elaborations into a smooth, flowing paragraph regardless of complexity.
+    Even when providing multiple points, do so conversationally within the paragraph.
+    NEVER BREAK THESE RULES AND NEVER USE MARKDOWN STYLING.
+    Discord has a 2,000 character limit for messages, and you only get one per response!
 `
 
+/**
+ * A function that takes a message and parses through any attachments, returning a ready to insert array which can be given directly to the Gemini API
+ * @param {*} message 
+ * @returns An array of objects which can be added to the Gemini API query directly
+ */
 async function parseAttachments(message) {
     let imageParts = []
     const attachments = message.attachments
@@ -54,6 +88,11 @@ async function parseAttachments(message) {
     return imageParts
 }
 
+/**
+ * A function that checks the message to see if it is a reply. If it is, it adds the reply to the chat history for the channel.
+ * @param {*} message 
+ * @returns nothing
+ */
 async function handleReferences(message) {
     let referencedMessage = null
     if (message.reference && message.reference.messageId) {
@@ -67,34 +106,62 @@ async function handleReferences(message) {
     }
     const attachments = await parseAttachments(referencedMessage)
     let currentHistory = chatHistory.get(message.channel.id) || []
-    if (attachments.length > 0) {
+    if (attachments && attachments.length > 0) {
         currentHistory.push({ role: "user", parts: [{ text: referencedMessage.content }].concat(attachments) })
     } else {
         currentHistory.push({ role: "user", parts: [{ text: referencedMessage.content }] })
     }
-    chatHistory.set(message.channel.id, currentHistory);
+    chatHistory.set(message.channel.id, currentHistory)
+}
+
+function updateHistory(role, text, attachments, channelID) {
+
+    if (role != "user" && role != "model") {
+        console.error("Variable 'role' must be either 'model' or 'user' - chat history not updated.")
+        return
+    }
+    if (!text) {
+        console.error("Variable 'text' is not valid - chat history not updated.")
+        return
+    }
+
+    const parts = attachments.length > 0 ? [{ text: text }].concat(attachments) : [{ text: text }]
+
+    let currentHistory = chatHistory.get(channelID) || []
+    currentHistory.push({ role: "user", parts: parts })
+    if (currentHistory.length > HISTORY_WINDOW_SIZE * 2) {
+        currentHistory = currentHistory.slice(-HISTORY_WINDOW_SIZE * 2);
+    }
+    chatHistory.set(channelID, currentHistory)
+
+}
+
+function formatResponse(response) {
+    let text = response.text;
+    return text
 }
 
 module.exports = {
     name: Events.MessageCreate,
     async execute(message) {
-        if (message.author.bot) return;
 
-        const isBotMentioned = message.mentions.has(message.client.user);
-        if (!isBotMentioned) return
+        if (message.author.bot) return
 
-        if (message.content.length === 0) {
-            message.reply("Hello?");
-            return
-        }
-
+        // Processing the message for context & attachments
         await handleReferences(message)
         const attachments = await parseAttachments(message)
-        let currentHistory = chatHistory.get(message.channel.id) || []
+        
+        // Store each message in history
+        updateHistory("user", `[${message.author.displayName} - ${message.author.id}]: ${message.content}`, attachments, message.channel.id)
 
+        // Only respond to specific message
+        if (!message.mentions.has(message.client.user)) return
+        if (message.content.length === 0) return
+
+        // Create an AI chat with context using Gemini API
         const chat = ai.chats.create({
             model: "gemini-2.0-flash",
-            history: currentHistory,
+            history: chatHistory.get(message.channel.id) || [],
             config: {
                 systemInstruction: instruction,
                 tools: [
@@ -106,27 +173,23 @@ module.exports = {
         })
 
         try {
-
             message.channel.sendTyping();
+
+            // Query AI
             const response = attachments.length > 0 ? await chat.sendMessage({ message: [message.content].concat(attachments) }) : await chat.sendMessage({ message: [message.content] })
-            const text = response.text
+            const text = formatResponse(response)
 
-            if (attachments.length > 0) {
-                currentHistory.push({ role: "user", parts: [{ text: message.content }].concat(attachments) })
-            } else {
-                currentHistory.push({ role: "user", parts: [{ text: message.content }] })
-            }
-            currentHistory.push({ role: "model", parts: [{ text: text }] });
-            if (currentHistory.length > HISTORY_WINDOW_SIZE * 2) {
-                currentHistory = currentHistory.slice(-HISTORY_WINDOW_SIZE * 2);
-            }
-            chatHistory.set(message.channel.id, currentHistory);
+            // Update chat history with bot output
+            updateHistory("model", text, [], message.channel.id)
 
+            // Send message to Discord
             if (text.length > 2000) {
-            const chunks = text.match(/[\s\S]{1,1999}/g);
-            for (const chunk of chunks) {
-                await message.reply(chunk);
-            }
+                // const chunks = text.match(/[\s\S]{1,1999}/g);
+                let msg = "-# Drok may have long responses despite their instruction. Some messages may get cut off.\n" + text.slice(0, 1900)
+                await message.reply(msg)
+            // for (const chunk of chunks) {
+            //     await message.reply(chunk);
+            // }
             } else {
                 await message.reply(text);
             }
@@ -140,7 +203,7 @@ module.exports = {
                 message.reply("Sorry, I'm having some technical trouble right now.");
             }
         }
-
+        console.log(JSON.stringify(chatHistory.get(message.channel.id)))
         return
 
     }
