@@ -1,7 +1,7 @@
-require("dotenv").config();
-const fs = require('node:fs');
-const path = require('node:path');
-const { Client, Collection, Events, GatewayIntentBits, MessageFlags } = require('discord.js');
+import 'dotenv/config'
+import fs from 'node:fs'
+import path from 'node:path'
+import { Client, Collection, GatewayIntentBits } from 'discord.js'
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
@@ -13,7 +13,7 @@ const commandFolders = fs.readdirSync(foldersPath);
 
 for (const folder of commandFolders) {
 	const commandsPath = path.join(foldersPath, folder);
-	const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+	const commandFiles = fs.readdirSync(commandsPath).filter(file => { return file.endsWith('.js') || file.endsWith('.ts') });
 	for (const file of commandFiles) {
 		const filePath = path.join(commandsPath, file);
 		const command = require(filePath);
@@ -26,7 +26,7 @@ for (const folder of commandFolders) {
 }
 
 const eventsPath = path.join(__dirname, 'events');
-const eventFiles = fs.readdirSync(eventsPath).filter(file => file.endsWith('.js'));
+const eventFiles = fs.readdirSync(eventsPath).filter(file => { return file.endsWith('.js') || file.endsWith('.ts') });
 
 for (const file of eventFiles) {
 	const filePath = path.join(eventsPath, file);
@@ -34,8 +34,9 @@ for (const file of eventFiles) {
 	if (event.once) {
 		client.once(event.name, (...args) => event.execute(...args));
 	} else {
+		console.log(event.name)
 		client.on(event.name, (...args) => event.execute(...args));
 	}
 }
-
+console.log("Starting Discord bot...");
 client.login(DISCORD_BOT_TOKEN);

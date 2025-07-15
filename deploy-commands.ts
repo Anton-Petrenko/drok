@@ -1,10 +1,10 @@
-require("dotenv").config();
-const { REST, Routes } = require('discord.js');
-const fs = require('node:fs');
-const path = require('node:path');
+import 'dotenv/config'
+import fs from 'node:fs'
+import path from 'node:path'
+import { REST, Routes } from 'discord.js'
 
-const DISCORD_APP_ID = process.env.DISCORD_APP_ID;
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const DISCORD_APP_ID = process.env.DISCORD_APP_ID || "";
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 
 const commands = [];
 // Grab all the command folders from the commands directory you created earlier
@@ -36,7 +36,7 @@ const rest = new REST().setToken(DISCORD_BOT_TOKEN);
 		console.log(`Started refreshing ${commands.length} application (/) commands.`);
 
 		// The put method is used to fully refresh all commands in the guild with the current set
-		const data = await rest.put(
+		const data: any = await rest.put(
 			Routes.applicationCommands(DISCORD_APP_ID),
 			{ body: commands },
 		);

@@ -1,9 +1,9 @@
-const { Events } = require('discord.js');
+import { ClientEvents, Events } from "discord.js";
 
 module.exports = {
 	name: Events.ClientReady,
 	once: true,
-	execute(client) {
+	execute(client: ClientEvents[Events.ClientReady][0]) {
 		console.log(`Ready! Logged in as ${client.user.tag}`);
 	},
 };
