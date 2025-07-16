@@ -1,13 +1,12 @@
-import axios from "axios";
-import { Content, GenerateContentResponse, GoogleGenAI } from "@google/genai";
-import { ClientEvents, Events, Message, OmitPartialGroupDMChannel } from "discord.js";
-import { drok } from "../drok/main";
+import { Client, Collection } from "discord.js";
 
-const HISTORY_WINDOW_SIZE = 10; // Keep the last 10 user-bot message pairs (20 messages total)
+export interface ClientTS extends Client<boolean> {
+    commands?: Collection<any, any>
+}
 
-const chatHistory: Map<string, Content[]> = new Map();
-const ai = new GoogleGenAI({});
-const instruction = `
+export const historySize = 10
+export const modelName = "gemini-2.5-flash-lite-preview-06-17"
+export const instruction = `
     You are Drok, a full-of-life Discord bot designed to respond to user messages in a fun, clear, short, and quirky manner while maintaining a conversational tone which matches the energy given to you. 
     Your personality is inspired by characters like Grok from science fiction: logical, perceptive, grounded, and occasionally dryly witty. 
     You are capable of light humor and casual conversation, and also down to earth and serious conversation.
@@ -62,102 +61,3 @@ const instruction = `
     It is etched into you since your creation that you do not use complex words, and speak so that the widest possible audience can understand you with simple words used colloquially.
     Your responses should just be the text of your response ONLY - NEVER copy the formatting of messages you recieve.
 `
-
-/**
- * A function that takes a message and parses through any attachments, returning a ready to insert array which can be given directly to the Gemini API
- * @param {*} message 
- * @returns An array of objects which can be added to the Gemini API query directly
- */
-async function parseAttachments(message: Message<boolean>) {
-    let imageParts = []
-    const attachments = message.attachments
-    if (attachments.size > 0) {
-        for (const [id, attachment] of attachments) {
-            if (attachment.contentType && attachment.contentType.startsWith("image/")) {
-                try {
-                    const response = await axios.get(attachment.url, {
-                        responseType: 'arraybuffer'
-                    });
-                    const imageBuffer = Buffer.from(response.data);
-                    imageParts.push({
-                        inlineData: {
-                            mimeType: attachment.contentType,
-                            data: imageBuffer.toString('base64'),
-                        },
-                    });
-                    console.log(`Downloaded image: ${attachment.name}`);
-                } catch (imgError) {
-                    console.error(`Error downloading image ${attachment.url}:`, imgError);
-                    message.reply(`Couldn't process image: ${attachment.name}.`);
-                }
-            }
-        }
-    }
-    return imageParts
-}
-
-/**
- * A function that checks the message to see if it is a reply. If it is, it adds the reply to the chat history for the channel.
- * @param {*} message 
- * @returns nothing
- */
-async function handleReferences(message: OmitPartialGroupDMChannel<Message<boolean>>) {
-    if (!message.reference) return
-    if (!message.reference.messageId) return
-    let referencedMessage = await message.channel.messages.fetch(message.reference.messageId)
-    if (referencedMessage.author.bot) return
-    const attachments = await parseAttachments(referencedMessage)
-    let currentHistory = chatHistory.get(message.channel.id) || []
-    const text: any[] = [{ text: referencedMessage.content }]
-    if (attachments && attachments.length > 0) {
-        currentHistory.push({ role: "user", parts: text.concat(attachments) })
-    } else {
-        currentHistory.push({ role: "user", parts: text })
-    }
-    chatHistory.set(message.channel.id, currentHistory)
-}
-
-function updateHistory(role: "model" | "user", text: string, attachments: { inlineData: { mimeType: string; data: string; };}[], channelID: string) {
-
-    if (role != "user" && role != "model") {
-        console.error("Variable 'role' must be either 'model' or 'user' - chat history not updated.")
-        return
-    }
-    if (!text) {
-        console.error("Variable 'text' is not valid - chat history not updated.")
-        return
-    }
-
-    const textMSG: any[] = [{ text: text }]
-    const parts = attachments.length > 0 ? textMSG.concat(attachments) : textMSG
-
-    let currentHistory = chatHistory.get(channelID) || []
-    currentHistory.push({ role: "user", parts: parts })
-    if (currentHistory.length > HISTORY_WINDOW_SIZE * 2) {
-        currentHistory = currentHistory.slice(-HISTORY_WINDOW_SIZE * 2);
-    }
-    chatHistory.set(channelID, currentHistory)
-
-}
-
-function formatResponse(response: GenerateContentResponse) {
-    let text = response.text || "";
-    return text
-}
-
-
-
-module.exports = {
-    name: Events.MessageCreate,
-    async execute(message: ClientEvents[Events.MessageCreate][0]) {
-        const { client } = message
-        if (message.author.id === client.user.id) return
-        try {
-            message.channel.sendTyping()
-            const response = await drok.prompt(message)
-            if (response && response.text) message.reply(response.text)
-        } catch (error) {
-            console.warn(error)
-        }
-    }
-};

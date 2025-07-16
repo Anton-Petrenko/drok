@@ -1,11 +1,12 @@
-import { BaseInteraction, ClientEvents, Events, MessageFlags } from "discord.js";
+import { ClientTS } from "../drok/types";
+import { BaseInteraction, Events, MessageFlags } from "discord.js";
 
 module.exports = {
 	name: Events.InteractionCreate,
 	async execute(interaction: BaseInteraction) {
 		if (!interaction.isChatInputCommand()) return;
 
-		const command = interaction.client.commands.get(interaction.commandName);
+		const command = (interaction.client as ClientTS).commands?.get(interaction.commandName);
 
 		if (!command) {
 			console.error(`No command matching ${interaction.commandName} was found.`);
