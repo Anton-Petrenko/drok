@@ -66,7 +66,8 @@ module.exports = {
 
         try {
             message.channel.sendTyping()
-            await drok.ask(message)
+            const reply = await drok.ask(message)
+            if (reply) await message.reply(reply)
         } catch (error) {
             console.error(error)
         }

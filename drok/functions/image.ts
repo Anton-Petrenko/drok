@@ -2,7 +2,7 @@ import { Type } from "@google/genai";
 
 export const ImageGenDeclaration = {
     name: "generate_image",
-    description: "Create an image",
+    description: "Draw an image when explicitly directed to",
     parameters: {
         type: Type.OBJECT,
         properties: {

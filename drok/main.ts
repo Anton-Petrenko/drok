@@ -18,9 +18,33 @@ class Drok {
     #chatHistory: Map<string, Content[]> = new Map();
 
     async ask(message: Message<boolean>) {
+        // const chat = this.#drok.chats.create({
+        //     model: "gemini-2.5-flash-lite-preview-06-17",
+        //     config: {
+        //         systemInstruction: instruction,
+        //         tools: [
+        //             {
+        //                 functionDeclarations: [
+        //                     ImageGenDeclaration,
+        //                     SearchDeclaration
+        //                 ]
+        //             }
+        //         ],
+        //         responseModalities: [Modality.TEXT]
+        //     },
+        //     history: this.#chatHistory.get(message.channel.id) || []
+        // })
 
-        const chat = this.#drok.chats.create({
+        // const response = await chat.sendMessage({ message: message.content })
+        // const reply = await this.delegate(response, message.channel.id)
+        // if (reply) return message.reply(reply)
+        // if (response.text) {
+        //     drok.log("model", response.text, [], message.channel.id)
+        //     message.reply(response.text)
+        // }
+        const reply = await this.#drok.models.generateContent({
             model: "gemini-2.5-flash-lite-preview-06-17",
+            contents: this.#chatHistory.get(message.channel.id) || [],
             config: {
                 systemInstruction: instruction,
                 tools: [
@@ -32,21 +56,17 @@ class Drok {
                     }
                 ],
                 responseModalities: [Modality.TEXT]
-            },
-            history: this.#chatHistory.get(message.channel.id) || []
+            }
         })
-
-        const response = await chat.sendMessage({ message: message.content })
-        const reply = await this.delegate(response, message.channel.id)
-        if (reply) return message.reply(reply)
-        if (response.text) {
-            drok.log("model", response.text, [], message.channel.id)
-            message.reply(response.text)
+        if (!reply.functionCalls) {
+            if (reply.text) drok.log("model", reply.text, [], message.channel.id)
+            return reply.text
         }
+        else return await this.delegate(reply, message.channel.id)
     }
 
     async delegate(response: GenerateContentResponse, channelID: string): Promise<any | undefined> {
-        // Only supports one function call (no daisy chains)
+        // No daisy chaining calls yet
         if (response.functionCalls && response.functionCalls.length > 0) {
             const { name, args } = response.functionCalls[0]
             if (name === "generate_image") {
@@ -59,9 +79,10 @@ class Drok {
                 const answer = await this.google(args, channelID)
                 if (!answer) return
                 drok.log("model", answer, [], channelID)
-                return answer
+                return `-# Drok searched the internet\n${answer}`
             }
         }
+
         return undefined
     }
 
