@@ -1,11 +1,17 @@
 import { Client, Collection } from "discord.js";
 
+export interface Attachments { 
+    inlineData: { 
+        mimeType: string,
+        data: string 
+    }
+}
+
 export interface ClientTS extends Client<boolean> {
     commands?: Collection<any, any>
 }
 
 export const historySize = 10
-export const modelName = "gemini-2.5-flash-lite-preview-06-17"
 export const instruction = `
     You are Drok, a full-of-life Discord bot designed to respond to user messages in a fun, clear, short, and quirky manner while maintaining a conversational tone which matches the energy given to you. 
     Your personality is inspired by characters like Grok from science fiction: logical, perceptive, grounded, and occasionally dryly witty. 

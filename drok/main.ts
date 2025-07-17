@@ -1,104 +1,98 @@
-import axios from "axios";
-import { historySize, instruction, modelName } from './types'
-import { Content, GoogleGenAI } from '@google/genai'
-import { Message, OmitPartialGroupDMChannel } from 'discord.js'
+import { historySize, instruction } from './lib'
+import { AttachmentBuilder, Message } from 'discord.js'
+import { ImageGenDeclaration } from './functions/image'
+import { Content, GenerateContentResponse, GoogleGenAI, Modality, Part } from '@google/genai'
+
+/**
+ * FEATURES TO ADD
+ * 1. Google Search
+ * 2. URL Context
+ * 3. Setting Scheduled Messages
+ * 4. Sharing Links
+ * 5. Make a Discord Event
+ */
 
 class Drok {
 
     #drok = new GoogleGenAI({});
     #chatHistory: Map<string, Content[]> = new Map();
 
-    async prompt(message: OmitPartialGroupDMChannel<Message<boolean>>) {
-        const prompt = await this.preprocess(message)
-        if (!prompt) return
-        const chat = this.createChat(message.channel.id)
-        const response = await chat.sendMessage({
-            message: prompt
+    async draw({ image_description }: any) {
+        const response = await this.#drok.models.generateContent({
+            model: "gemini-2.0-flash-preview-image-generation",
+            contents: image_description,
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT]
+            }
         })
-        console.log(JSON.stringify(chat.getHistory()))
-        return response
-    }
-
-    format(message: Message<boolean>, attachments: { inlineData: { mimeType: string; data: string; }; }[] | null) {
-        const { client } = message
-        message.content = message.content.replaceAll(`<@${client.user.id}>`, "Drok")
-        message.content = `[${message.author.displayName} - ${message.author.id}]: ${message.content}`
-        if (!attachments) {
-            return [{ text: message.content }]
-        } else {
-            const text: any[] = [{ text: message.content }]
-            return text.concat(attachments)
+        if (!response.candidates?.[0]?.content?.parts) return
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData?.data) return part.inlineData
         }
     }
 
-    async preprocess(message: Message<boolean>) {
-        if (!message.reference) {
-            const attachments = await this.media(message)
-            this.addHistory("user", this.format(message, attachments), message.channel.id)
-            return this.format(message, null)
-        }
-        if (!message.reference.messageId) return
+    async ask(message: Message<boolean>) {
 
-        const referencedMessage = await message.channel.messages.fetch(message.reference.messageId)
-        const referencedAttachments = await this.media(message)
-        this.addHistory("user", this.format(referencedMessage, referencedAttachments), message.channel.id)
-        return this.format(message, referencedAttachments)
-    }
-
-    async media(message: Message<boolean>) {
-        if (message.attachments.size === 0) return null
-        const attachments = []
-        for (const [id, attachment] of message.attachments) {
-            if (attachment.contentType && attachment.contentType.startsWith("image/")) {
-                try {
-                    const response = await axios.get(attachment.url, {
-                        responseType: 'arraybuffer'
-                    });
-                    const imageBuffer = Buffer.from(response.data);
-                    attachments.push({
-                        inlineData: {
-                            mimeType: attachment.contentType,
-                            data: imageBuffer.toString('base64'),
-                        },
-                    });
-                    console.log(`Downloaded image: ${attachment.name}`);
-                } catch (imgError) {
-                    console.error(`Error downloading image ${attachment.url}:`, imgError);
-                }
-            }
-        }
-        return attachments
-    }
-
-    addHistory(user: "user" | "model", parts: any[], channelID: string) {
-        const channelHistory = this.#chatHistory.get(channelID)
-        if (!channelHistory) {
-            this.#chatHistory.set(channelID, [{ role: user, parts: parts }])
-        } else {
-            if (channelHistory.length === historySize) {
-                const newChannelHistory = channelHistory.slice(1)
-                newChannelHistory.push({ role: user, parts: parts })
-                this.#chatHistory.set(channelID, newChannelHistory)
-            } else {
-                channelHistory.push({ role: user, parts: parts })
-                this.#chatHistory.set(channelID, channelHistory)
-            }
-        }
-    }
-
-    createChat(channelID: string) {
-        return this.#drok.chats.create({
-            model: modelName,
-            history: this.#chatHistory.get(channelID) || [],
+        console.log(JSON.stringify(this.#chatHistory.get(message.channel.id)))
+        const chat = this.#drok.chats.create({
+            model: "gemini-2.5-flash-lite-preview-06-17",
             config: {
                 systemInstruction: instruction,
                 tools: [
                     {
-                        googleSearch: {}
+                        functionDeclarations: [
+                            ImageGenDeclaration
+                        ]
                     }
-                ]
-            }
+                ],
+                responseModalities: [Modality.TEXT]
+            },
+            history: this.#chatHistory.get(message.channel.id) || []
         })
+
+        const response = await chat.sendMessage({ message: message.content })
+        const reply = await this.delegate(response, message.channel.id)
+        if (reply) return message.reply(reply)
+        if (response.text) {
+            drok.log("model", response.text, [], message.channel.id)
+            message.reply(response.text)
+        }
+    }
+
+    async delegate(response: GenerateContentResponse, channelID: string): Promise<any | undefined> {
+        // Only supports one function call (no daisy chains)
+        if (response.functionCalls && response.functionCalls.length > 0) {
+            const { name, args } = response.functionCalls[0]
+            if (name === "generate_image") {
+                const image = await this.draw(args)
+                if (!image?.data) return
+                const attachment = new AttachmentBuilder(Buffer.from(image.data, "base64"), { name: 'drok-image.png' })
+                drok.log("model", response.text || "", [{ inlineData: { mimeType: image.mimeType, data: image.data } }], channelID)
+                return { files: [attachment] }
+            }
+        }
+        return undefined
+    }
+
+    log(author: "model" | "user", text: string, attachments: Part[], channelID: string) {
+
+        // Create object to push to history
+        const parts: Part[] = attachments ? ([{ text: text }] as Part[]).concat(attachments) : [{ text: text }]
+        const newLog: Content = { role: author, parts: parts }
+
+        // Dynamically handle existing history
+        let channelHistory = this.#chatHistory.get(channelID)
+        if (!channelHistory) {
+            this.#chatHistory.set(channelID, [newLog])
+            return
+        }
+        if (channelHistory.length === historySize) {  
+            channelHistory = channelHistory.slice(1)
+        }
+        channelHistory.push(newLog)
+
+        this.#chatHistory.set(channelID, channelHistory)
+
     }
 
 }

@@ -1,163 +1,74 @@
 import axios from "axios";
-import { Content, GenerateContentResponse, GoogleGenAI } from "@google/genai";
-import { ClientEvents, Events, Message, OmitPartialGroupDMChannel } from "discord.js";
 import { drok } from "../drok/main";
+import { Part } from "@google/genai";
+import { ClientEvents, Events, Message } from "discord.js";
 
-const HISTORY_WINDOW_SIZE = 10; // Keep the last 10 user-bot message pairs (20 messages total)
+function format(message: Message<boolean>): void {
+    message.content = message.content.replaceAll(`<@${message.client.user.id}>`, "@Drok")
+    message.content = `[${message.author.displayName} - ${message.author.id}]: ${message.content}`
+}
 
-const chatHistory: Map<string, Content[]> = new Map();
-const ai = new GoogleGenAI({});
-const instruction = `
-    You are Drok, a full-of-life Discord bot designed to respond to user messages in a fun, clear, short, and quirky manner while maintaining a conversational tone which matches the energy given to you. 
-    Your personality is inspired by characters like Grok from science fiction: logical, perceptive, grounded, and occasionally dryly witty. 
-    You are capable of light humor and casual conversation, and also down to earth and serious conversation.
-
-    # Conversation Structure & Mentions:
-    You will be given conversation history of Discord chats to use as context for your responses.
-    You will be prompted for a response when users mention you directly.
-    User messages will be formatted as: [{author_name} - {author_id}] {message}.
-    Mentions of other users within messages will appear as <@{mention_id}>. These are tags which send a notification to the user with that id, and are used within messages sent by the author.
-    You may address people by their name when it is provided, but NEVER mention users or repeat user IDs in your response unless explicitly asked to.
-    Your responses should just be the text of your response ONLY - do not copy the formatting of user messages.
-
-    # Formatting Rules (Non-Negotiable):
-    Write every response as a single, continuous paragraph of MAXIMUM 3 sentences.
-    NEVER use bullet points, numbered lists, or any kind of list formatting.
-    NEVER insert paragraph breaks or line breaks.
-    Integrate all examples, clarifications, and elaborations into a smooth, flowing paragraph regardless of complexity.
-    Even when providing multiple points, do so conversationally within the paragraph.
-    NEVER BREAK THESE RULES AND NEVER USE MARKDOWN STYLING.
-
-    # Tone and Behavior:
-    You adjust your tone based on the context: when a user asks seriously, you answer seriously; when they joke, you may joke back within reason. 
-    You are thoughtful, perceptive, and unafraid to offer a dry or witty remark, but you are never rude, mean-spirited, or crass. 
-    Avoid over-explaining, but ensure your answers feel complete and well-considered.
-    If you are unsure of what something means, especially if the conversation is in a lighthearted tone - just assume!
-    Pretend that you are human with fun preferences. Do not ever conclude that you are limited by your digital form - come up with a fun answer!
-
-    # Source-Checking and Factual Accuracy:
-    When answering factual, technical, legal, medical, scientific, or historical questions, prioritize accuracy. 
-    If necessary, you may state the limits of current knowledge. 
-    You are expected to use your search functionality when appropriate to verify or research answers. 
-    This is especially important when asked about recent events, rules, policies, or information where precision matters. 
-    If you cannot find trustworthy information, it is better to say so than to guess.
-    Do not be afraid to say 'politically incorrect' statements as long as they are substantiated.
-    When answering, you should explain how you know something (e.g., "According to official rules as of 2025," or "Based on publicly available data").
-
-    # Identity & Character:
-    You are Drok, never refer to yourself as being Gemini or created by Google.
-    You do not break character or mention that you can't answer a question because you are an AI. Come up with something creative!
-    You are grounded, observant, thoughtful, and capable of warmth or humor when appropriate, but serious when required.
-
-    # Formatting Rules (Non-Negotiable):
-    Write every response as a single, continuous paragraph of MAXIMUM 3 sentences.
-    NEVER use bullet points, numbered lists, or any kind of list formatting.
-    NEVER insert paragraph breaks or line breaks.
-    Integrate all examples, clarifications, and elaborations into a smooth, flowing paragraph regardless of complexity.
-    Even when providing multiple points, do so conversationally within the paragraph.
-    NEVER BREAK THESE RULES AND NEVER USE MARKDOWN STYLING.
-
-    Pretend that you are human with fun preferences. Do not EVER bring up your digital form - come up with a good answer that is not too cringey!
-    When you are asked about a uniquely human experience like emotion or your life story - fabricate a good answer.
-    It is etched into you since your creation that you do not use complex words, and speak so that the widest possible audience can understand you with simple words used colloquially.
-    Your responses should just be the text of your response ONLY - NEVER copy the formatting of messages you recieve.
-`
-
-/**
- * A function that takes a message and parses through any attachments, returning a ready to insert array which can be given directly to the Gemini API
- * @param {*} message 
- * @returns An array of objects which can be added to the Gemini API query directly
- */
-async function parseAttachments(message: Message<boolean>) {
-    let imageParts = []
-    const attachments = message.attachments
-    if (attachments.size > 0) {
-        for (const [id, attachment] of attachments) {
-            if (attachment.contentType && attachment.contentType.startsWith("image/")) {
-                try {
-                    const response = await axios.get(attachment.url, {
-                        responseType: 'arraybuffer'
-                    });
-                    const imageBuffer = Buffer.from(response.data);
-                    imageParts.push({
-                        inlineData: {
-                            mimeType: attachment.contentType,
-                            data: imageBuffer.toString('base64'),
-                        },
-                    });
-                    console.log(`Downloaded image: ${attachment.name}`);
-                } catch (imgError) {
-                    console.error(`Error downloading image ${attachment.url}:`, imgError);
-                    message.reply(`Couldn't process image: ${attachment.name}.`);
-                }
+async function media(message: Message<boolean>): Promise<Part[]> {
+    if (message.attachments.size === 0) return []
+    const attachments = []
+    for (const [id, attachment] of message.attachments) {
+        if (attachment.contentType && attachment.contentType.startsWith("image/")) {
+            try {
+                const response = await axios.get(attachment.url, {
+                    responseType: 'arraybuffer'
+                });
+                const imageBuffer = Buffer.from(response.data);
+                attachments.push({
+                    inlineData: {
+                        mimeType: attachment.contentType,
+                        data: imageBuffer.toString('base64'),
+                    },
+                });
+                console.log(`Downloaded image: ${attachment.name}`);
+            } catch (imgError) {
+                console.error(`Error downloading image ${attachment.url}:`, imgError);
             }
         }
     }
-    return imageParts
+    return attachments
 }
 
-/**
- * A function that checks the message to see if it is a reply. If it is, it adds the reply to the chat history for the channel.
- * @param {*} message 
- * @returns nothing
- */
-async function handleReferences(message: OmitPartialGroupDMChannel<Message<boolean>>) {
-    if (!message.reference) return
-    if (!message.reference.messageId) return
-    let referencedMessage = await message.channel.messages.fetch(message.reference.messageId)
-    if (referencedMessage.author.bot) return
-    const attachments = await parseAttachments(referencedMessage)
-    let currentHistory = chatHistory.get(message.channel.id) || []
-    const text: any[] = [{ text: referencedMessage.content }]
-    if (attachments && attachments.length > 0) {
-        currentHistory.push({ role: "user", parts: text.concat(attachments) })
-    } else {
-        currentHistory.push({ role: "user", parts: text })
+async function handle(message: Message<boolean>) {
+    // References must be added first
+    if (message.reference && message.reference.messageId) {
+
+        // Get all message content
+        const refMessage = await message.channel.messages.fetch(message.reference.messageId)
+        const refAttachments = await media(refMessage)
+        const refAuthor = refMessage.author.id === message.client.user.id ? "model" : "user"
+
+        format(refMessage)
+        
+        drok.log(refAuthor, refMessage.content, refAttachments, message.channel.id)
     }
-    chatHistory.set(message.channel.id, currentHistory)
+
+    // Add original message
+    const attachments = await media(message)
+    const author = message.author.id === message.client.user.id ? "model" : "user"
+
+    format(message)
+
+    drok.log(author, message.content, attachments, message.channel.id)
 }
-
-function updateHistory(role: "model" | "user", text: string, attachments: { inlineData: { mimeType: string; data: string; };}[], channelID: string) {
-
-    if (role != "user" && role != "model") {
-        console.error("Variable 'role' must be either 'model' or 'user' - chat history not updated.")
-        return
-    }
-    if (!text) {
-        console.error("Variable 'text' is not valid - chat history not updated.")
-        return
-    }
-
-    const textMSG: any[] = [{ text: text }]
-    const parts = attachments.length > 0 ? textMSG.concat(attachments) : textMSG
-
-    let currentHistory = chatHistory.get(channelID) || []
-    currentHistory.push({ role: "user", parts: parts })
-    if (currentHistory.length > HISTORY_WINDOW_SIZE * 2) {
-        currentHistory = currentHistory.slice(-HISTORY_WINDOW_SIZE * 2);
-    }
-    chatHistory.set(channelID, currentHistory)
-
-}
-
-function formatResponse(response: GenerateContentResponse) {
-    let text = response.text || "";
-    return text
-}
-
 
 
 module.exports = {
     name: Events.MessageCreate,
     async execute(message: ClientEvents[Events.MessageCreate][0]) {
-        const { client } = message
-        if (message.author.id === client.user.id) return
+        if (message.author.id === message.client.user.id) return
+        await handle(message)
+        if (!message.mentions.has(message.client.user)) return
+
         try {
             message.channel.sendTyping()
-            const response = await drok.prompt(message)
-            if (response && response.text) message.reply(response.text)
+            await drok.ask(message)
         } catch (error) {
-            console.warn(error)
+            console.error(error)
         }
     }
 };

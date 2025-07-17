@@ -1,4 +1,4 @@
-import { ClientTS } from "../drok/types";
+import { ClientTS } from "../drok/lib";
 import { BaseInteraction, Events, MessageFlags } from "discord.js";
 
 module.exports = {

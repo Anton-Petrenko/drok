@@ -2,7 +2,7 @@ import 'dotenv/config'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Client, Collection, GatewayIntentBits } from 'discord.js'
-import { ClientTS } from './drok/types';
+import { ClientTS } from './drok/lib';
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
