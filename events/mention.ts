@@ -44,7 +44,7 @@ async function handle(message: Message<boolean>) {
 
         format(refMessage)
         
-        drok.log(refAuthor, refMessage.content, refAttachments, message.channel.id)
+        drok.log(refAuthor, refMessage.content, refAttachments, null, null, message.channel.id)
     }
 
     // Add original message
@@ -53,7 +53,7 @@ async function handle(message: Message<boolean>) {
 
     format(message)
 
-    drok.log(author, message.content, attachments, message.channel.id)
+    drok.log(author, message.content, attachments, null, null, message.channel.id)
 }
 
 
